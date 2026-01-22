@@ -1,0 +1,1 @@
+* This project uses uv. DO NOT RUN PYHTON OR PIP DIRECTLY. ALWAYS USE UV.
