@@ -23,7 +23,11 @@
 ## How To Run
 - Ensure `.env` exists with the required vars.
 - Use uv to run:
-  - `uv run python main.py`
+  - `uv run python -m holo_chan.main`
+
+## Tests
+- Always run tests with uv:
+  - `uv run pytest`
 
 ## Notes
 - `tts.py` guards Windows-only event loop policy calls, so it works on macOS.

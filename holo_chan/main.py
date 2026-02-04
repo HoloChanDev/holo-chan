@@ -9,8 +9,8 @@ from typing import Any, Callable
 from dotenv import load_dotenv
 from litellm import acompletion
 
-from stt import STTConfig, STTListener
-from tts import speak
+from holo_chan.stt import STTConfig, STTListener
+from holo_chan.tts import speak
 
 # ----------------------------------------------------------------------
 # 🎛️  CONFIGURATION
@@ -138,7 +138,10 @@ def call_tool(name: str, args: dict[str, Any]) -> str | None:
 
 
 async def run_agent(
-    user_query: str, messages: list[dict[str, str]] | None = None
+    user_query: str,
+    messages: list[dict[str, str]] | None = None,
+    completion_func: Callable[..., Any] | None = None,
+    speak_func: Callable[[str], Any] | None = None,
 ) -> list[dict[str, str]]:
     api_key = os.getenv("GROQ_API_KEY")
     if not api_key:
@@ -163,10 +166,13 @@ async def run_agent(
     # Add user query to conversation
     messages.append(build_message("user", user_query))
 
+    completion = completion_func or acompletion
+    speak_out = speak_func or speak
+
     for turn in range(1, MAX_TURNS + 1):
         try:
             print("🧠 Calling LLM...")
-            response = await acompletion(
+            response = await completion(
                 model=GROQ_MODEL,
                 messages=messages,
                 temperature=TEMPERATURE,
@@ -174,7 +180,8 @@ async def run_agent(
                 stream=False,
             )
         except Exception as exc:
-            sys.exit(f"❌ LiteLLM API request failed: {exc}")
+            print(f"❌ LiteLLM API request failed: {exc}", file=sys.stderr)
+            break
 
         try:
             assistant_msg = response.choices[0].message.content
@@ -193,7 +200,7 @@ async def run_agent(
                 break
             messages.append(build_message("assistant", assistant_msg))
             print("🗣️  Speaking response")
-            await speak(assistant_msg)
+            await speak_out(assistant_msg)
             break
 
         tool_name, tool_args = parsed
