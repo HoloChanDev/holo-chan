@@ -52,6 +52,7 @@ class STTListener:
             return
 
         # Connect to the Whisper server
+        print(f"🔌 Connecting to STT server at {self.config.host}:{self.config.port}")
         self._socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self._socket.connect((self.config.host, self.config.port))
         self._socket.setblocking(False)
@@ -76,6 +77,7 @@ class STTListener:
             return
 
         self._running = False
+        print("🛑 Stopping STT listener")
 
         # Cancel receive task
         if self._receive_task:

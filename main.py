@@ -6,6 +6,7 @@ import sys
 from dataclasses import dataclass
 from typing import Any, Callable
 
+from dotenv import load_dotenv
 from litellm import acompletion
 
 from stt import STTConfig, STTListener
@@ -13,6 +14,8 @@ from tts import speak
 
 # ----------------------------------------------------------------------
 # 🎛️  CONFIGURATION
+
+load_dotenv()
 
 GROQ_MODEL = (
     "groq/meta-llama/llama-4-scout-17b-16e-instruct"  # LiteLLM format for Groq models
@@ -91,6 +94,16 @@ def build_message(role: str, content: str) -> dict[str, str]:
     return {"role": role, "content": content}
 
 
+def _env_int(name: str, default: int) -> int:
+    value = os.getenv(name)
+    if not value:
+        return default
+    try:
+        return int(value)
+    except ValueError:
+        sys.exit(f"❌ {name} must be an integer, got {value!r}.")
+
+
 def parse_tool_call(message: str) -> tuple[str, dict[str, Any]] | None:
     try:
         payload = json.loads(message)
@@ -152,6 +165,7 @@ async def run_agent(
 
     for turn in range(1, MAX_TURNS + 1):
         try:
+            print("🧠 Calling LLM...")
             response = await acompletion(
                 model=GROQ_MODEL,
                 messages=messages,
@@ -178,10 +192,12 @@ async def run_agent(
             if not assistant_msg:
                 break
             messages.append(build_message("assistant", assistant_msg))
+            print("🗣️  Speaking response")
             await speak(assistant_msg)
             break
 
         tool_name, tool_args = parsed
+        print(f"🛠️  Tool call: {tool_name} {tool_args}")
 
         # Check if this is a stop tool
         if tool_name in ("wait_for_more", "done"):
@@ -206,10 +222,11 @@ async def main() -> None:
     """Main loop that listens for audio and processes transcriptions."""
     # Configure STT listener
     stt_config = STTConfig(
-        host="localhost",
-        port=43007,
+        host=os.getenv("STT_HOST", "localhost"),
+        port=_env_int("STT_PORT", 43007),
         chunk_ms=1000,
     )
+    print(f"🎙️  STT -> {stt_config.host}:{stt_config.port}")
 
     # Initialize conversation state
     api_key = os.getenv("GROQ_API_KEY")

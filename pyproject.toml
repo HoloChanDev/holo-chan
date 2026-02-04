@@ -6,7 +6,9 @@ readme = "README.md"
 requires-python = ">=3.12,<3.13"
 dependencies = [
     "litellm>=1.81.1",
+    "numpy>=2.4.2",
     "openai>=2.15.0",
+    "python-dotenv>=1.2.1",
     "pyzmq>=27.1.0",
     "simpleaudio>=1.0.4",
     "sounddevice>=0.5.5",
