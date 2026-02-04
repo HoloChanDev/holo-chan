@@ -3,8 +3,9 @@ import json
 import os
 import pprint as pp
 import sys
+from collections.abc import Awaitable
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import Any, Callable, cast
 
 from dotenv import load_dotenv
 from litellm import acompletion
@@ -137,10 +138,22 @@ def call_tool(name: str, args: dict[str, Any]) -> str | None:
 # 🤖  Core agent loop (async)
 
 
+async def _ai_completion(messages: list[dict[str, str]]) -> str:
+    response = await acompletion(
+        model=GROQ_MODEL,
+        messages=messages,
+        temperature=TEMPERATURE,
+        max_tokens=MAX_TOKENS,
+        stream=False,
+    )
+
+    return response.choices[0].message.content  # type: ignore
+
+
 async def run_agent(
     user_query: str,
     messages: list[dict[str, str]] | None = None,
-    completion_func: Callable[..., Any] | None = None,
+    completion_func: Callable[[list[dict[str, str]]], Awaitable[str]] | None = None,
     speak_func: Callable[[str], Any] | None = None,
 ) -> list[dict[str, str]]:
     api_key = os.getenv("GROQ_API_KEY")
@@ -166,25 +179,18 @@ async def run_agent(
     # Add user query to conversation
     messages.append(build_message("user", user_query))
 
-    completion = completion_func or acompletion
+    completion = completion_func or _ai_completion
     speak_out = speak_func or speak
 
     for turn in range(1, MAX_TURNS + 1):
         try:
             print("🧠 Calling LLM...")
-            response = await completion(
-                model=GROQ_MODEL,
-                messages=messages,
-                temperature=TEMPERATURE,
-                max_tokens=MAX_TOKENS,
-                stream=False,
-            )
+            assistant_msg = await completion(messages)
         except Exception as exc:
             print(f"❌ LiteLLM API request failed: {exc}", file=sys.stderr)
             break
 
         try:
-            assistant_msg = response.choices[0].message.content
             if assistant_msg is None:
                 assistant_msg = ""
             else:

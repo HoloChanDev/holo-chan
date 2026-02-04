@@ -2,14 +2,14 @@ import asyncio
 import os
 import sys
 
-from dotenv import load_dotenv
 import numpy as np
 import sounddevice as sd
 import zmq
 import zmq.asyncio
+from dotenv import load_dotenv
 
 if sys.platform.startswith("win"):
-    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())  # type: ignore
 
 # ----------------------------------------------------------------------
 # 🎛️  CONFIGURATION

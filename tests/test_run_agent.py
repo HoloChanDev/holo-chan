@@ -1,26 +1,15 @@
-import types
-
 import pytest
 
 from holo_chan import main
 
 
-class _Choice:
-    def __init__(self, content: str | None):
-        self.message = types.SimpleNamespace(content=content)
-
-
-class _Response:
-    def __init__(self, content: str | None):
-        self.choices = [_Choice(content)]
-
-
 @pytest.mark.asyncio
-async def test_run_agent_plain_response_calls_speak():
+async def test_run_agent_plain_response_calls_speak(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("GROQ_API_KEY", "test-key")
     spoken: list[str] = []
 
-    async def fake_completion(**_kwargs):
-        return _Response("Hello there.")
+    async def fake_completion(_messages: list[dict[str, str]]):
+        return "Hello there."
 
     async def fake_speak(text: str) -> None:
         spoken.append(text)
@@ -38,11 +27,12 @@ async def test_run_agent_plain_response_calls_speak():
 
 
 @pytest.mark.asyncio
-async def test_run_agent_done_tool_does_not_speak():
+async def test_run_agent_done_tool_does_not_speak(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("GROQ_API_KEY", "test-key")
     spoken: list[str] = []
 
-    async def fake_completion(**_kwargs):
-        return _Response('{"tool_calls":{"name":"done","arguments":{}}}')
+    async def fake_completion(_messages: list[dict[str, str]]):
+        return '{"tool_calls":{"name":"done","arguments":{}}}'
 
     async def fake_speak(text: str) -> None:
         spoken.append(text)
@@ -59,8 +49,12 @@ async def test_run_agent_done_tool_does_not_speak():
 
 
 @pytest.mark.asyncio
-async def test_run_agent_completion_error_does_not_exit():
-    async def fake_completion(**_kwargs):
+async def test_run_agent_completion_error_does_not_exit(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.setenv("GROQ_API_KEY", "test-key")
+
+    async def fake_completion(_messages: list[dict[str, str]]):
         raise RuntimeError("boom")
 
     async def fake_speak(_text: str) -> None:
