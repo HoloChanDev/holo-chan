@@ -3,7 +3,8 @@ import os
 import sys
 
 from dotenv import load_dotenv
-import simpleaudio as sa
+import numpy as np
+import sounddevice as sd
 import zmq
 import zmq.asyncio
 
@@ -55,20 +56,12 @@ async def speak(text: str) -> None:
     sampling_rate_bytes, audio_bytes = await socket.recv_multipart()
     sample_rate = int.from_bytes(sampling_rate_bytes)
 
-    # Play the audio
-    play_obj = sa.play_buffer(
-        audio_bytes,
-        num_channels=1,
-        bytes_per_sample=2,  # int16 = 2 bytes
-        sample_rate=sample_rate,
-    )
+    audio = np.frombuffer(audio_bytes, dtype=np.int16)
+    sd.play(audio, samplerate=sample_rate)
 
-    # Set is_speaking to False when we're done speaking
-    async def _watch():
+    async def _watch_sd():
         global is_speaking
-        # wait in a worker thread
-        await asyncio.to_thread(play_obj.wait_done)
+        await asyncio.to_thread(sd.wait)
         is_speaking = False
 
-    # schedule watcher and return immediately
-    asyncio.create_task(_watch())
+    asyncio.create_task(_watch_sd())
