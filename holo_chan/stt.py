@@ -147,8 +147,13 @@ class STTListener:
                     await asyncio.sleep(0.01)
                     continue
                 data = await asyncio.to_thread(self._socket.recv, 4096)
-                if data:
-                    text = " ".join(data.decode().split(" ")[2:]).strip()
+                if not data:
+                    # Server closed the connection.
+                    print("🛑 STT server closed the connection.")
+                    self._running = False
+                    break
+                text = " ".join(data.decode().split(" ")[2:]).strip()
+                if text:
                     await self._queue.put(text)
             except (BlockingIOError, TimeoutError):
                 await asyncio.sleep(0.01)

@@ -252,20 +252,17 @@ async def main() -> None:
         build_message("system", full_system_prompt),
     ]
 
-    try:
-        async with STTListener(stt_config) as listener:
-            async for transcription in listener.transcriptions():
-                if not transcription or not transcription.strip():
-                    continue
+    async with STTListener(stt_config) as listener:
+        async for transcription in listener.transcriptions():
+            if not transcription or not transcription.strip():
+                continue
 
-                print(f"\n🎤 {transcription}")
-                messages = await run_agent(transcription, messages)
-
-    except KeyboardInterrupt:
-        pass
-    except Exception as e:
-        print(f"Error: {e}", file=sys.stderr)
+            print(f"\n🎤 {transcription}")
+            messages = await run_agent(transcription, messages)
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        print("\n🛑 Shutting down.")
