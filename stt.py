@@ -4,6 +4,7 @@ Streams microphone audio to a Whisper server and yields transcriptions.
 """
 
 import asyncio
+import queue
 import socket
 import sys
 from dataclasses import dataclass
@@ -37,7 +38,9 @@ class STTListener:
         self._stream: Optional[sd.InputStream] = None
         self._running = False
         self._queue: asyncio.Queue[str] = asyncio.Queue()
+        self._audio_queue: Optional[queue.Queue[bytes]] = None
         self._receive_task: Optional[asyncio.Task] = None
+        self._send_task: Optional[asyncio.Task] = None
 
     async def __aenter__(self):
         await self.start()
@@ -55,7 +58,8 @@ class STTListener:
         print(f"🔌 Connecting to STT server at {self.config.host}:{self.config.port}")
         self._socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self._socket.connect((self.config.host, self.config.port))
-        self._socket.setblocking(False)
+        # Use a timeout to prevent blocking indefinitely on recv.
+        self._socket.settimeout(0.5)
 
         # Set up audio stream with callback
         self._stream = sd.InputStream(
@@ -66,6 +70,10 @@ class STTListener:
             blocksize=CHUNK,
         )
         self._stream.start()
+
+        # Queue audio chunks from the callback to a sender task.
+        self._audio_queue = queue.Queue(maxsize=20)
+        self._send_task = asyncio.create_task(self._send_audio())
 
         # Start receiving transcriptions in background
         self._receive_task = asyncio.create_task(self._receive_transcriptions())
@@ -86,6 +94,12 @@ class STTListener:
                 await self._receive_task
             except asyncio.CancelledError:
                 pass
+        if self._send_task:
+            self._send_task.cancel()
+            try:
+                await self._send_task
+            except asyncio.CancelledError:
+                pass
 
         # Stop audio stream
         if self._stream:
@@ -102,8 +116,28 @@ class STTListener:
         """Callback for audio data - sends to socket."""
         if status:
             print(status, file=sys.stderr)
-        if self._socket:
-            self._socket.sendall(indata.tobytes())
+        if self._audio_queue:
+            try:
+                self._audio_queue.put_nowait(indata.tobytes())
+            except queue.Full:
+                # Drop audio if the sender is temporarily backed up.
+                pass
+
+    async def _send_audio(self) -> None:
+        """Background task to send queued audio to server."""
+        while self._running:
+            try:
+                if self._socket is None or self._audio_queue is None:
+                    await asyncio.sleep(0.01)
+                    continue
+                chunk = await asyncio.to_thread(self._audio_queue.get)
+                await asyncio.to_thread(self._socket.sendall, chunk)
+            except (BlockingIOError, TimeoutError):
+                await asyncio.sleep(0.01)
+            except Exception as e:
+                if self._running:
+                    print(f"Error sending audio: {e}", file=sys.stderr)
+                break
 
     async def _receive_transcriptions(self) -> None:
         """Background task to receive transcriptions from server."""
@@ -116,7 +150,7 @@ class STTListener:
                 if data:
                     text = " ".join(data.decode().split(" ")[2:]).strip()
                     await self._queue.put(text)
-            except BlockingIOError:
+            except (BlockingIOError, TimeoutError):
                 await asyncio.sleep(0.01)
             except Exception as e:
                 if self._running:
