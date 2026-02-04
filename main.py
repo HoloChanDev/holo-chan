@@ -6,9 +6,9 @@ import sys
 from dataclasses import dataclass
 from typing import Any, Callable
 
-import zmq
 from litellm import acompletion
 
+from stt import STTConfig, STTListener
 from tts import speak
 
 # ----------------------------------------------------------------------
@@ -54,7 +54,6 @@ def tool_done() -> str | None:
 
 
 def tool_dance(dance: str | int) -> str | None:
-    print(f"Dancing dance number {dance!r}")
     return f"Performing dance number {dance}"
 
 
@@ -104,8 +103,8 @@ def parse_tool_call(message: str) -> tuple[str, dict[str, Any]] | None:
             return name, args
     except json.JSONDecodeError:
         pass
-    except Exception as exc:
-        print(f"⚠️  Failed to parse tool call: {exc}", file=sys.stderr)
+    except Exception:
+        pass
     return None
 
 
@@ -125,7 +124,9 @@ def call_tool(name: str, args: dict[str, Any]) -> str | None:
 # 🤖  Core agent loop (async)
 
 
-async def run_agent(user_query: str) -> None:
+async def run_agent(
+    user_query: str, messages: list[dict[str, str]] | None = None
+) -> list[dict[str, str]]:
     api_key = os.getenv("GROQ_API_KEY")
     if not api_key:
         sys.exit("❌ Environment variable GROQ_API_KEY not set.")
@@ -140,10 +141,14 @@ async def run_agent(user_query: str) -> None:
         + SYSTEM_PROMPT_AFTER_TOOL_CALLS
     )
 
-    messages: list[dict[str, str]] = [
-        build_message("system", full_system_prompt),
-        build_message("user", user_query),
-    ]
+    # Initialize messages if not provided
+    if messages is None:
+        messages = [
+            build_message("system", full_system_prompt),
+        ]
+
+    # Add user query to conversation
+    messages.append(build_message("user", user_query))
 
     for turn in range(1, MAX_TURNS + 1):
         try:
@@ -163,48 +168,34 @@ async def run_agent(user_query: str) -> None:
                 assistant_msg = ""
             else:
                 assistant_msg = assistant_msg.strip()
-        except (IndexError, AttributeError, ValueError) as e:
-            print("ERROR GETTING MESSAGE FROM AI", e)
+        except (IndexError, AttributeError, ValueError):
             assistant_msg = ""  # Fallback for unexpected response format
-        print(f"\n🗣️  Assistant (turn {turn}):\n{assistant_msg}\n")
 
         parsed = parse_tool_call(assistant_msg)
 
         if parsed is None:
             # No tool call - just a text response
             if not assistant_msg:
-                # Empty response - treat as stop signal
-                print("🛑 STOPPING: Empty response received")
                 break
-            print("ℹ️  No tool call detected, treating as text response")
             messages.append(build_message("assistant", assistant_msg))
             await speak(assistant_msg)
-            continue
+            break
 
         tool_name, tool_args = parsed
-        print(f"🔧  Detected tool call → {tool_name}{tool_args}")
 
         # Check if this is a stop tool
         if tool_name in ("wait_for_more", "done"):
-            print(f"🛑 STOPPING: Tool '{tool_name}' was called")
             messages.append(build_message("assistant", assistant_msg))
             break
 
-        print(f"⚙️  Executing tool: {tool_name}")
         tool_result = call_tool(tool_name, tool_args)
-        print(f"📦  Tool result:\n{tool_result}\n")
 
         messages.append(build_message("assistant", assistant_msg))
         messages.append(
             build_message("user", f"Result of `{tool_name}`: {tool_result}")
         )
 
-    else:
-        print("⚠️  Reached MAX_TURNS without a final answer.")
-
-    print(f"\n{'=' * 60}")
-    print(f"🏁 Agent loop finished")
-    print(f"{'=' * 60}\n")
+    return messages
 
 
 # ----------------------------------------------------------------------
@@ -212,9 +203,44 @@ async def run_agent(user_query: str) -> None:
 
 
 async def main() -> None:
-    print("Enter prompt")
-    query = input(">>> ").strip()
-    await run_agent(query)
+    """Main loop that listens for audio and processes transcriptions."""
+    # Configure STT listener
+    stt_config = STTConfig(
+        host="localhost",
+        port=43007,
+        chunk_ms=1000,
+    )
+
+    # Initialize conversation state
+    api_key = os.getenv("GROQ_API_KEY")
+    if not api_key:
+        sys.exit("❌ Environment variable GROQ_API_KEY not set.")
+
+    full_system_prompt = (
+        SYSTEM_PROMPT
+        + "\n"
+        + pp.pformat({k: v for k, v in TOOLS.items()})
+        + "\n"
+        + SYSTEM_PROMPT_AFTER_TOOL_CALLS
+    )
+
+    messages: list[dict[str, str]] = [
+        build_message("system", full_system_prompt),
+    ]
+
+    try:
+        async with STTListener(stt_config) as listener:
+            async for transcription in listener.transcriptions():
+                if not transcription or not transcription.strip():
+                    continue
+
+                print(f"\n🎤 {transcription}")
+                messages = await run_agent(transcription, messages)
+
+    except KeyboardInterrupt:
+        pass
+    except Exception as e:
+        print(f"Error: {e}", file=sys.stderr)
 
 
 if __name__ == "__main__":

@@ -4,7 +4,7 @@ import simpleaudio as sa
 import zmq
 import zmq.asyncio
 
-asyncio.set_event_loop_policy(asyncio._WindowsSelectorEventLoopPolicy())
+asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 # Set up ZeroMQ client
 context = zmq.asyncio.Context()
@@ -18,7 +18,6 @@ async def speak(text: str) -> None:
     # Wait for the model to stop speaking
     global is_speaking
     while is_speaking is True:
-        print("Waiting to be done speaking...")
         await asyncio.sleep(1)
     is_speaking = True
 
