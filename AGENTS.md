@@ -29,6 +29,10 @@
 - Always run tests with uv:
   - `uv run pytest`
 
+## Type Checking
+- Run pyright with uv:
+  - `uv run pyright`
+
 ## Notes
 - `tts.py` guards Windows-only event loop policy calls, so it works on macOS.
 - Tool calls are JSON-only and must match the schema in `SYSTEM_PROMPT`.
