@@ -194,6 +194,8 @@ async def run_agent(
             print(f"❌ LiteLLM API request failed: {exc}", file=sys.stderr)
             break
 
+        print(f"🧾 LLM raw output: {assistant_msg!r}")
+
         try:
             if assistant_msg is None:
                 assistant_msg = ""
