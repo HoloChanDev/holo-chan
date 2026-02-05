@@ -1,98 +1,29 @@
 import asyncio
-import json
 import os
-import pprint as pp
 import sys
-from collections.abc import Awaitable
-from dataclasses import dataclass
-from typing import Any, Callable, cast
+from contextlib import AsyncExitStack
+from typing import TYPE_CHECKING
 
 from dotenv import load_dotenv
-from litellm import acompletion
 
-from holo_chan.stt import STTConfig, STTListener
-from holo_chan.tts import speak
-
-# ----------------------------------------------------------------------
-# 🎛️  CONFIGURATION
+from holo_chan.agent import FULL_SYSTEM_PROMPT, build_message, run_agent
+from holo_chan.io.input_local import LocalInputSource
+from holo_chan.io.interfaces import InputSource, OutputSink
+from holo_chan.stt import STTConfig
 
 load_dotenv()
 
-GROQ_MODEL = (
-    "groq/meta-llama/llama-4-scout-17b-16e-instruct"  # LiteLLM format for Groq models
-)
-TEMPERATURE = 0.7
-MAX_TOKENS = 1024
 
-MAX_TURNS = 10
-TOOL_CALL_TAG = "tool_calls"
-
-SYSTEM_PROMPT = """You are Hatsune Miku, an anime girl and a hologram. You have access to some external tools.
-When you need to use a tool, respond **only** with a JSON object that follows this schema:
-
-{
-    "tool_calls": {
-        "name": "<tool_name>",
-        "arguments": { ... }               # a JSON-serializable dict of arguments
-    }
-}
-
-Do NOT add any other text before or after the JSON.  If you do not need a tool, answer the user directly in plain English.
-
-Available tools:
-"""
-
-SYSTEM_PROMPT_AFTER_TOOL_CALLS = """
-You are a virtual hologram that speaks, you respond in short sentences when possible, \
-you don't want to speak for minutes unless you're sure that is what the user wants, and they usually don't.
-
-You are a dilligent assistant, you should usually respond to the user, unless you're completely sure they only want you to do something and not tell you anything about what you're doing.
-"""
-
-# ----------------------------------------------------------------------
-# 🛠️  TOOL IMPLEMENTATIONS
-
-
-def tool_done() -> str | None:
-    return None
-
-
-def tool_dance(dance: str | int) -> str | None:
-    return f"Performing dance number {dance}"
-
-
-def tool_backflip() -> str | None:
-    return "Performing backflip"
-
-
-@dataclass
-class Tool:
-    func: Callable[..., str | None]
-    description: str
-
-
-TOOLS: dict[str, Tool] = {
-    "wait_for_more": Tool(
-        tool_done,
-        "Wait for the user to continue speaking, ALWAYS call this if you think the user isn't done speaking. Takes no arguments.",
-    ),
-    "done": Tool(
-        tool_done,
-        "You're done, let the user continue speaking, You can continue making more calls until you call this. YOU ALWYAS NEED TO CALL THIS TO STOP.",
-    ),
-    "dance": Tool(
-        tool_dance,
-        "Dance as the hologram. Takes `dance` as the dance you want to perform, can be 1 2 or 3",
-    ),
-    "backflip": Tool(tool_backflip, "Perform a backflip. Takes no arguments."),
-}
-
-# ----------------------------------------------------------------------
-# 🧩  Helper utilities
-
-
-def build_message(role: str, content: str) -> dict[str, str]:
-    return {"role": role, "content": content}
+def _env_bool(name: str, default: bool = False) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    normalized = raw.strip().lower()
+    if normalized in ("1", "true", "yes", "y", "on"):
+        return True
+    if normalized in ("0", "false", "no", "n", "off"):
+        return False
+    sys.exit(f"❌ {name} must be a boolean-like value, got {raw!r}.")
 
 
 def _env_int(name: str, default: int) -> int:
@@ -105,166 +36,96 @@ def _env_int(name: str, default: int) -> int:
         sys.exit(f"❌ {name} must be an integer, got {value!r}.")
 
 
-def parse_tool_call(message: str) -> tuple[str, dict[str, Any]] | None:
-    try:
-        payload = json.loads(message)
-        if isinstance(payload, dict) and TOOL_CALL_TAG in payload:
-            call = payload[TOOL_CALL_TAG]
-            name = call["name"]
-            args = call.get("arguments", {})
-            if not isinstance(args, dict):
-                raise ValueError("`arguments` must be a JSON object")
-            return name, args
-    except json.JSONDecodeError:
-        pass
-    except Exception:
-        pass
-    return None
-
-
-def call_tool(name: str, args: dict[str, Any]) -> str | None:
-    tool = TOOLS.get(name)
-    if tool is None:
-        return f"Error: unknown tool '{name}'."
-    try:
-        return tool.func(**args)
-    except TypeError as exc:
-        return f"Error: wrong arguments for tool '{name}': {exc}"
-    except Exception as exc:
-        return f"Error while executing tool '{name}': {exc}"
-
-
-# ----------------------------------------------------------------------
-# 🤖  Core agent loop (async)
-
-
-async def _ai_completion(messages: list[dict[str, str]]) -> str:
-    response = await acompletion(
-        model=GROQ_MODEL,
-        messages=messages,
-        temperature=TEMPERATURE,
-        max_tokens=MAX_TOKENS,
-        stream=False,
-    )
-
-    return response.choices[0].message.content  # type: ignore
-
-
-async def run_agent(
-    user_query: str,
-    messages: list[dict[str, str]] | None = None,
-    completion_func: Callable[[list[dict[str, str]]], Awaitable[str]] | None = None,
-    speak_func: Callable[[str], Any] | None = None,
-) -> list[dict[str, str]]:
-    api_key = os.getenv("GROQ_API_KEY")
-    if not api_key:
-        sys.exit("❌ Environment variable GROQ_API_KEY not set.")
-
-    # litellm.api_key = api_key
-
-    full_system_prompt = (
-        SYSTEM_PROMPT
-        + "\n"
-        + pp.pformat({k: v for k, v in TOOLS.items()})
-        + "\n"
-        + SYSTEM_PROMPT_AFTER_TOOL_CALLS
-    )
-
-    # Initialize messages if not provided
-    if messages is None:
-        messages = [
-            build_message("system", full_system_prompt),
-        ]
-
-    # Add user query to conversation
-    messages.append(build_message("user", user_query))
-
-    completion = completion_func or _ai_completion
-    speak_out = speak_func or speak
-
-    for turn in range(1, MAX_TURNS + 1):
-        try:
-            print("🧠 Calling LLM...")
-            assistant_msg = await completion(messages)
-        except Exception as exc:
-            print(f"❌ LiteLLM API request failed: {exc}", file=sys.stderr)
-            break
-
-        try:
-            if assistant_msg is None:
-                assistant_msg = ""
-            else:
-                assistant_msg = assistant_msg.strip()
-        except (IndexError, AttributeError, ValueError):
-            assistant_msg = ""  # Fallback for unexpected response format
-
-        parsed = parse_tool_call(assistant_msg)
-
-        if parsed is None:
-            # No tool call - just a text response
-            if not assistant_msg:
-                break
-            messages.append(build_message("assistant", assistant_msg))
-            print("🗣️  Speaking response")
-            await speak_out(assistant_msg)
-            break
-
-        tool_name, tool_args = parsed
-        print(f"🛠️  Tool call: {tool_name} {tool_args}")
-
-        # Check if this is a stop tool
-        if tool_name in ("wait_for_more", "done"):
-            messages.append(build_message("assistant", assistant_msg))
-            break
-
-        tool_result = call_tool(tool_name, tool_args)
-
-        messages.append(build_message("assistant", assistant_msg))
-        messages.append(
-            build_message("user", f"Result of `{tool_name}`: {tool_result}")
-        )
-
-    return messages
-
-
-# ----------------------------------------------------------------------
-# 🏁  Example driver
-
-
-async def main() -> None:
-    """Main loop that listens for audio and processes transcriptions."""
-    # Configure STT listener
+def _build_local_input_source() -> InputSource:
     stt_config = STTConfig(
         host=os.getenv("STT_HOST", "localhost"),
         port=_env_int("STT_PORT", 43007),
         chunk_ms=1000,
     )
-    print(f"🎙️  STT -> {stt_config.host}:{stt_config.port}")
+    print(f"STT -> {stt_config.host}:{stt_config.port}")
+    return LocalInputSource(stt_config)
+
+
+def _build_local_output_sink() -> OutputSink:
+    from holo_chan.io.output_local import LocalSpeaker
+
+    return LocalSpeaker()
+
+
+if TYPE_CHECKING:
+    from holo_chan.io.output_local import LocalSpeaker
+    from holo_chan.integrations.discord import wiring as discord_wiring
+    from holo_chan.integrations.discord.session import DiscordSession
+
+
+def _build_discord_session():
+    from holo_chan.integrations.discord import wiring as discord_wiring
+
+    return discord_wiring.build_session()
+
+
+def _build_discord_input_source(session: "DiscordSession") -> InputSource:
+    from holo_chan.integrations.discord import wiring as discord_wiring
+
+    return discord_wiring.build_input_source(session)
+
+
+def _build_discord_output_sink(session: "DiscordSession") -> OutputSink:
+    from holo_chan.integrations.discord import wiring as discord_wiring
+
+    return discord_wiring.build_output_sink(session)
+
+
+async def _maybe_enter(stack: AsyncExitStack, obj):
+    aenter = getattr(obj, "__aenter__", None)
+    if aenter is None:
+        return obj
+    return await stack.enter_async_context(obj)
+
+
+async def main() -> None:
+    """Main loop that listens for audio and processes transcriptions."""
+    use_discord = _env_bool("HOLO_DISCORD", False)
 
     # Initialize conversation state
     api_key = os.getenv("GROQ_API_KEY")
     if not api_key:
         sys.exit("❌ Environment variable GROQ_API_KEY not set.")
 
-    full_system_prompt = (
-        SYSTEM_PROMPT
-        + "\n"
-        + pp.pformat({k: v for k, v in TOOLS.items()})
-        + "\n"
-        + SYSTEM_PROMPT_AFTER_TOOL_CALLS
-    )
-
     messages: list[dict[str, str]] = [
-        build_message("system", full_system_prompt),
+        build_message("system", FULL_SYSTEM_PROMPT),
     ]
 
-    async with STTListener(stt_config) as listener:
-        async for transcription in listener.transcriptions():
+    session = None
+    if use_discord:
+        session = _build_discord_session()
+
+    if use_discord:
+        input_source = _build_discord_input_source(session)
+    else:
+        input_source = _build_local_input_source()
+
+    if use_discord:
+        output_sink = _build_discord_output_sink(session)
+    else:
+        output_sink = _build_local_output_sink()
+
+    async with AsyncExitStack() as stack:
+        if session is not None:
+            session = await _maybe_enter(stack, session)
+        input_source = await _maybe_enter(stack, input_source)
+        output_sink = await _maybe_enter(stack, output_sink)
+
+        async for transcription in input_source:
             if not transcription or not transcription.strip():
                 continue
 
-            print(f"\n🎤 {transcription}")
-            messages = await run_agent(transcription, messages)
+            print(f"\nUser: {transcription}")
+            messages = await run_agent(
+                transcription,
+                messages,
+                output_sink=output_sink,
+            )
 
 
 if __name__ == "__main__":

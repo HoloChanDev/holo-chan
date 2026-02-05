@@ -32,7 +32,16 @@ context = zmq.asyncio.Context()
 socket = context.socket(zmq.REQ)
 tts_host = os.getenv("TTS_HOST", "localhost")
 tts_port = _env_int("TTS_PORT", 5511)
-socket.connect(f"tcp://{tts_host}:{tts_port}")
+print(f"🔌 Connecting to TTS server at {tts_host}:{tts_port}...")
+try:
+    socket.connect(f"tcp://{tts_host}:{tts_port}")
+except Exception as exc:
+    print(
+        f"❌ Failed to connect to TTS server at {tts_host}:{tts_port}: {exc}",
+        file=sys.stderr,
+    )
+    raise
+print(f"✅ Connected to TTS server at {tts_host}:{tts_port}")
 
 is_speaking = False
 _logged_tts_connection = False

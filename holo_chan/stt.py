@@ -55,9 +55,17 @@ class STTListener:
             return
 
         # Connect to the Whisper server
-        print(f"🔌 Connecting to STT server at {self.config.host}:{self.config.port}")
+        print(f"🔌 Connecting to STT server at {self.config.host}:{self.config.port}...")
         self._socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self._socket.connect((self.config.host, self.config.port))
+        try:
+            self._socket.connect((self.config.host, self.config.port))
+        except Exception as exc:
+            print(
+                f"❌ Failed to connect to STT server at {self.config.host}:{self.config.port}: {exc}",
+                file=sys.stderr,
+            )
+            raise
+        print(f"✅ Connected to STT server at {self.config.host}:{self.config.port}")
         # Use a timeout to prevent blocking indefinitely on recv.
         self._socket.settimeout(0.5)
 
