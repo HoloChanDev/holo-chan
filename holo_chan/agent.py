@@ -8,12 +8,7 @@ from typing import Any, Callable
 
 from litellm import acompletion
 
-from typing import TYPE_CHECKING
-
 from holo_chan.io.interfaces import OutputSink
-
-if TYPE_CHECKING:
-    from holo_chan.io.output_local import LocalSpeaker
 
 # ----------------------------------------------------------------------
 # 🎛️  CONFIGURATION
