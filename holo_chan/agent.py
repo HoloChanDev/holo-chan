@@ -71,10 +71,10 @@ TOOLS: dict[str, Tool] = {
         tool_done,
         "Wait for the user to continue speaking, ALWAYS call this if you think the user isn't done speaking. Takes no arguments.",
     ),
-    "done": Tool(
-        tool_done,
-        "You're done, let the user continue speaking, You can continue making more calls until you call this. YOU ALWYAS NEED TO CALL THIS TO STOP.",
-    ),
+    # "done": Tool(
+    #     tool_done,
+    #     "You're done, let the user continue speaking, You can continue making more calls until you call this. YOU ALWYAS NEED TO CALL THIS TO STOP.",
+    # ),
     "dance": Tool(
         tool_dance,
         "Dance as the hologram. Takes `dance` as the dance you want to perform, can be 1 2 or 3",
