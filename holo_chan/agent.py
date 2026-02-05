@@ -18,7 +18,7 @@ if TYPE_CHECKING:
 # ----------------------------------------------------------------------
 # 🎛️  CONFIGURATION
 
-GROQ_MODEL = (
+DEFAULT_LLM_MODEL = (
     "groq/meta-llama/llama-4-scout-17b-16e-instruct"  # LiteLLM format for Groq models
 )
 TEMPERATURE = 0.7
@@ -138,8 +138,9 @@ def call_tool(name: str, args: dict[str, Any]) -> str | None:
 
 
 async def _ai_completion(messages: list[dict[str, str]]) -> str:
+    model = os.getenv("LLM_MODEL", DEFAULT_LLM_MODEL)
     response = await acompletion(
-        model=GROQ_MODEL,
+        model=model,
         messages=messages,
         temperature=TEMPERATURE,
         max_tokens=MAX_TOKENS,

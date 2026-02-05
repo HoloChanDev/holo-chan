@@ -17,8 +17,10 @@
 
 ## Environment Variables
 - `GROQ_API_KEY`: required for LiteLLM/Groq requests.
+- `LLM_MODEL`: optional model override (LiteLLM format). Defaults to `groq/meta-llama/llama-4-scout-17b-16e-instruct`.
 - `STT_HOST`, `STT_PORT`: remote STT server address (defaults: `localhost:43007`).
 - `TTS_HOST`, `TTS_PORT`: remote TTS server address (defaults: `localhost:5511`).
+Note: When adding new env vars, update this AGENTS.md and `.env.example`.
 
 ## How To Run
 - Ensure `.env` exists with the required vars.
